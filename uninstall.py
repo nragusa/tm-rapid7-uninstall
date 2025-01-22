@@ -54,7 +54,7 @@ def process_batch(batch: List[str], package: str) -> None:
             },
             CloudWatchOutputConfig={
                 'CloudWatchOutputEnabled': True,
-                'CloudWatchLogGroupName': f'/tm/{package.lower().replace(' ', '-')}Uninstall'
+                'CloudWatchLogGroupName': f"/tm/{package.lower().replace(' ', '-')}Uninstall"
             }
         )
     except ClientError as e:
