@@ -109,6 +109,9 @@ def check_instances(instance_ids: List[str]) -> List[str]:
                 except ClientError:
                     logging.error(
                         'Instance %s is not valid', instance_id)
+                except Exception as e:
+                    logging.error('Error processing instance %s: %s',
+                                  instance_id, str(e))
 
     return valid_ids
 
