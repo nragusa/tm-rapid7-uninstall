@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
+import argparse
 import csv
 import logging
 import sys
 import boto3
 from botocore.exceptions import ClientError
 
-RESOURCE_ID_FILE = 'resource_id.csv'
-AGENT_NAME = 'wget'
+PACKAGE_NAME = 'wget'
 REGION_NAME = 'us-east-2'
 
 
@@ -37,27 +37,43 @@ def process_batch(batch):
     """
     Runs the `AWS-ConfigureAWSPackage` AWS SSM Run Document against a batch of up to
     50 valid EC2 instance IDs
+
+    Args:
+        batch: List of valid EC2 instance IDs
     """
     client = boto3.client('ssm', region_name=REGION_NAME)
     try:
+        logging.info('Uninstalling %s from batch: %s',
+                     PACKAGE_NAME, str(batch))
         client.send_command(
             InstanceIds=batch,
             DocumentName='AWS-ConfigureAWSPackage',
             Parameters={
                 'action': ['Uninstall'],
-                'name': [AGENT_NAME]
+                'name': [PACKAGE_NAME]
             },
             CloudWatchOutputConfig={
                 'CloudWatchOutputEnabled': True,
-                'CloudWatchLogGroupName': 'aws/ssm/Rapid7AgentUninstall'
+                'CloudWatchLogGroupName': f'/tm/{PACKAGE_NAME.lower().replace(' ', '-')}Uninstall'
             }
         )
     except ClientError as e:
-        print(e)
+        logging.error('Error processing batch: %s', str(e))
         sys.exit(1)
 
 
 def check_instances(instance_ids):
+    """
+    Checks that the passed EC2 instance IDs are both valid (meaning they exist in the
+    AWS account and region) and that the EC2 instance is currently running. If both are
+    true, the instance ID is added to a list and returned. Otherwise the instance ID
+    is logged and ignored from further processing.
+
+    Args:
+        instance_ids: A list of EC2 instance IDs to check
+    Returns:
+        valid_ids: A list of EC2 instance IDs that exist and EC2 instance is running
+    """
     ec2 = boto3.client('ec2', region_name=REGION_NAME)
     valid_ids = []
 
@@ -96,14 +112,28 @@ def check_instances(instance_ids):
     return valid_ids
 
 
-with open(RESOURCE_ID_FILE, 'r', encoding='utf-8') as f:
-    reader = csv.reader(f)
-    next(reader, None)
-    resource_id_list = [row for row in reader]
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Uninstalls a package from EC2 instances that was previously installed with AWS Systems Manager Distributor')
+    parser.add_argument(
+        'resource_id_file', help='The name of the CSV file containing the resource IDs', nargs='?')
+    args = parser.parse_args()
 
-# Check if instances are valid
-# A valid instance is one in which the instance ID exists and the instance is running
-valid_instances = check_instances([item[0] for item in resource_id_list])
+    if args.resource_id_file is None:
+        parser.print_help()
+        sys.exit(1)
 
-# Uninstall package from valid instances
-uninstall_package(valid_instances)
+    resource_id_file = args.resource_id_file
+
+    # Read the CSV file
+    with open(resource_id_file, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        resource_id_list = [row for row in reader]
+
+    # Check if instances are valid
+    # A valid instance is one in which the instance ID exists and the instance is running
+    valid_instances = check_instances([item[0] for item in resource_id_list])
+
+    # Uninstall package from valid instances
+    uninstall_package(valid_instances)
