@@ -46,7 +46,7 @@ def process_batch(batch: List[str], package: str) -> None:
         logging.info('Uninstalling %s from batch: %s',
                      package, str(batch))
         client.send_command(
-            InstanceIds=batch,
+            InstanceIds=batch[0],
             DocumentName='AWS-ConfigureAWSPackage',
             Parameters={
                 'action': ['Uninstall'],
