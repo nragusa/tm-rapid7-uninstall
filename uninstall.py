@@ -44,7 +44,7 @@ def process_batch(batch: List[str], package: str) -> None:
     """
 
     try:
-        logging.info('Uninstalling %s from batch: %s',
+        logging.info('Uninstalling %s from instance IDs: %s',
                      package, str(batch))
         response = ssm.send_command(
             InstanceIds=batch,
@@ -108,6 +108,8 @@ def check_instances(instance_ids: List[str]) -> List[str]:
             logging.error('Error processing instance: %s', str(e))
             sys.exit(1)
 
+    logging.info('Found %d valid ID(s) out of %d',
+                 len(valid_ids), len(instance_ids))
     return valid_ids
 
 
