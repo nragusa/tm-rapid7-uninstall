@@ -95,6 +95,7 @@ def check_instances(instance_ids: List[str]) -> List[str]:
             # If batch fails, check instances individually
             for instance_id in batch:
                 try:
+                    logging.info('Checking instance %s', instance_id)
                     response = ec2.describe_instances(
                         InstanceIds=[instance_id])
                     instance = response['Reservations'][0]['Instances'][0]
