@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 
 # Configuration
 REGION_NAME = 'us-east-1'
+ssm = boto3.client('ssm', region_name=REGION_NAME)
 
 # Logging
 logging.basicConfig(
@@ -41,11 +42,11 @@ def process_batch(batch: List[str], package: str) -> None:
     Args:
         batch: List of valid EC2 instance IDs
     """
-    client = boto3.client('ssm', region_name=REGION_NAME)
+
     try:
         logging.info('Uninstalling %s from batch: %s',
                      package, str(batch))
-        client.send_command(
+        response = ssm.send_command(
             InstanceIds=batch,
             DocumentName='AWS-ConfigureAWSPackage',
             Parameters={
@@ -57,6 +58,9 @@ def process_batch(batch: List[str], package: str) -> None:
                 'CloudWatchLogGroupName': f"/tm/{package.lower().replace(' ', '-')}Uninstall"
             }
         )
+        command_id = response.get('Command', {}).get('CommandId', '--')
+        status = response.get('Command', {}).get('Status', '--')
+        logging.info('Command ID: %s Status: %s', command_id, status)
     except ClientError as e:
         logging.error('Error processing batch: %s', str(e))
         sys.exit(1)
@@ -64,54 +68,45 @@ def process_batch(batch: List[str], package: str) -> None:
 
 def check_instances(instance_ids: List[str]) -> List[str]:
     """
-    Checks that the passed EC2 instance IDs are both valid (meaning they exist in the
-    AWS account and region) and that the EC2 instance is currently running. If both are
-    true, the instance ID is added to a list and returned. Otherwise the instance ID
-    is logged and ignored from further processing.
+    Checks the SSM agent status for each EC2 instance ID that is passed. If the ID
+    is invalid it is ignored. Otherwise, it will get the "PingStatus" of the agent.
 
     Args:
         instance_ids: A list of EC2 instance IDs to check
     Returns:
-        valid_ids: A list of EC2 instance IDs that exist and EC2 instance is running
+        valid_ids: A list of EC2 instance IDs that exist and the SSM agent is online
     """
-    ec2 = boto3.client('ec2', region_name=REGION_NAME)
-    valid_ids = []
 
-    # First try batch request
-    for i in range(0, len(instance_ids), 100):
-        batch = instance_ids[i:i + 100]
+    next_token = None
+    valid_ids = []
+    while True:
         try:
-            response = ec2.describe_instances(InstanceIds=batch)
-            for reservation in response['Reservations']:
-                for instance in reservation['Instances']:
-                    if instance['State']['Name'] == 'running':
-                        logging.info(
-                            'Valid instance found with ID %s', instance['InstanceId'])
-                        valid_ids.append(instance['InstanceId'])
-                    else:
-                        logging.warning(
-                            'Valid instance %s is not running', instance['InstanceId'])
-        except ClientError:
-            # If batch fails, check instances individually
-            for instance_id in batch:
-                try:
-                    logging.info('Checking instance %s', instance_id)
-                    response = ec2.describe_instances(
-                        InstanceIds=[instance_id])
-                    instance = response['Reservations'][0]['Instances'][0]
-                    if instance['State']['Name'] == 'running':
-                        logging.info(
-                            'Valid instance found with ID %s', instance['InstanceId'])
-                        valid_ids.append(instance['InstanceId'])
-                    else:
-                        logging.warning(
-                            'Valid instance %s is not running', instance['InstanceId'])
-                except ClientError:
-                    logging.error(
-                        'Instance %s is not valid', instance_id)
-                except Exception as e:
-                    logging.error('Error processing instance %s: %s',
-                                  instance_id, str(e))
+            if next_token:
+                response = ssm.describe_instance_information(
+                    Filters=[{'Key': 'InstanceIds', 'Values': instance_ids}],
+                    NextToken=next_token
+                )
+            else:
+                response = ssm.describe_instance_information(
+                    Filters=[{'Key': 'InstanceIds', 'Values': instance_ids}]
+                )
+            for instance in response['InstanceInformationList']:
+                if instance['PingStatus'] == 'Online':
+                    logging.info(
+                        'Valid instance found with ID %s', instance['InstanceId'])
+                    valid_ids.append(instance['InstanceId'])
+                else:
+                    logging.warning(
+                        'Valid instance %s is not online', instance['InstanceId'])
+
+            if 'NextToken' in response:
+                next_token = response['NextToken']
+            else:
+                break
+
+        except ClientError as e:
+            logging.error('Error processing instance: %s', str(e))
+            sys.exit(1)
 
     return valid_ids
 
@@ -146,4 +141,8 @@ if __name__ == '__main__':
     valid_instances = check_instances([item[0] for item in resource_id_list])
 
     # Uninstall package from valid instances
-    uninstall_package(valid_instances, package_name)
+    if len(valid_instances) > 0:
+        uninstall_package(valid_instances, package_name)
+    else:
+        logging.warning('No valid instances found')
+        sys.exit(1)
