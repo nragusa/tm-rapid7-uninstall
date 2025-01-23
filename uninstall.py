@@ -125,7 +125,9 @@ def check_instances(instance_ids: List[str]) -> List[str]:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Uninstalls a package from EC2 instances that was previously installed with AWS Systems Manager Distributor')
+        description=('Uninstalls a package from EC2 instances that was previously '
+                     'installed with AWS Systems Manager Distributor')
+    )
     parser.add_argument(
         'resource_id_file', help='The name of the CSV file containing the resource IDs')
     parser.add_argument(
@@ -149,9 +151,9 @@ if __name__ == '__main__':
     # A valid instance is one in which the instance ID exists and the instance is running
     valid_instances = check_instances(list(unique_resource_ids))
 
-    # Uninstall package from valid instances
-    if len(valid_instances) > 0:
-        uninstall_package(valid_instances, package_name)
-    else:
+    # Exit if no instances found
+    if not valid_instances:
         logging.warning('No valid instances found')
         sys.exit(1)
+
+    uninstall_package(valid_instances, package_name)
