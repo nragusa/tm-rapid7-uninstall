@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 
+"""
+A simple script that reads in a CSV file, parses out the EC2 instance
+IDs from the first column, checks AWS SSM to make sure it's a managed
+node with the agent running, then uses AWS SSM Run Command to uninstall
+a specified package that was installed by AWS SSM Distributor.
+
+Usage: python uninstall.py -p <my distributor package> <path to csv>
+"""
+
 import argparse
 import csv
 import logging
@@ -9,7 +18,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 # Configuration
-REGION_NAME = 'us-east-2'
+REGION_NAME = 'us-east-1'
 ssm = boto3.client('ssm', region_name=REGION_NAME)
 
 # Logging
@@ -123,10 +132,7 @@ if __name__ == '__main__':
         '-p', '--package-name', help='The name of the package to uninstall', required=True)
     args = parser.parse_args()
 
-    if args.resource_id_file is None:
-        parser.print_help()
-        sys.exit(1)
-    if args.package_name is None:
+    if args.resource_id_file is None or args.package_name is None:
         parser.print_help()
         sys.exit(1)
 
@@ -136,12 +142,12 @@ if __name__ == '__main__':
     # Read the CSV file
     with open(resource_id_file, 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
-        next(reader, None)
-        resource_id_list = [row for row in reader]
+        next(reader, None)  # Skip header
+        unique_resource_ids = {row[0] for row in reader if row}
 
     # Check if instances are valid
     # A valid instance is one in which the instance ID exists and the instance is running
-    valid_instances = check_instances([item[0] for item in resource_id_list])
+    valid_instances = check_instances(list(unique_resource_ids))
 
     # Uninstall package from valid instances
     if len(valid_instances) > 0:
