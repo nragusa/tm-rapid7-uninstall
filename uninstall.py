@@ -28,8 +28,32 @@ logging.basicConfig(
     filename='uninstall.log'
 )
 
+# Arguments
+parser = argparse.ArgumentParser(
+    description=('Uninstalls a package from EC2 instances that was previously '
+                 'installed with AWS Systems Manager Distributor')
+)
+parser.add_argument(
+    'resource_id_file', help='The name of the CSV file containing the resource IDs')
+parser.add_argument(
+    '-p', '--package-name', help='The name of the package to uninstall', required=True)
+parser.add_argument(
+    '-m', '--mode', choices=['distributor', 'powershell'],
+    default='distributor',
+    help='Operating mode (default: distributor)'
+)
+args = parser.parse_args()
 
-def uninstall_package(items: List[str], package: str, batch_size: int = 50) -> None:
+if args.resource_id_file is None or args.package_name is None:
+    parser.print_help()
+    sys.exit(1)
+
+RESOURCE_ID_FILE = args.resource_id_file
+PACKAGE_NAME = args.package_name
+MODE = args.mode
+
+
+def uninstall_package(items: List[str], batch_size: int = 50) -> None:
     """
     Process items in batches of specified size.
 
@@ -40,10 +64,10 @@ def uninstall_package(items: List[str], package: str, batch_size: int = 50) -> N
     for i in range(0, len(items), batch_size):
         batch = items[i:i + batch_size]
         # Process your batch here
-        process_batch(batch, package)
+        process_batch(batch)
 
 
-def process_batch(batch: List[str], package: str) -> None:
+def process_batch(batch: List[str]) -> None:
     """
     Runs the `AWS-ConfigureAWSPackage` AWS SSM Run Document against a batch of up to
     50 valid EC2 instance IDs
@@ -53,20 +77,43 @@ def process_batch(batch: List[str], package: str) -> None:
     """
 
     try:
-        logging.info('Uninstalling %s from instance IDs: %s',
-                     package, str(batch))
-        response = ssm.send_command(
-            InstanceIds=batch,
-            DocumentName='AWS-ConfigureAWSPackage',
-            Parameters={
-                'action': ['Uninstall'],
-                'name': [package]
-            },
-            CloudWatchOutputConfig={
-                'CloudWatchOutputEnabled': True,
-                'CloudWatchLogGroupName': f"/tm/{package.lower().replace(' ', '-')}Uninstall"
-            }
-        )
+        logging.info('Uninstalling %s using %s from instance IDs: %s',
+                     PACKAGE_NAME, MODE, str(batch))
+        if MODE == 'distributor':
+            response = ssm.send_command(
+                InstanceIds=batch,
+                DocumentName='AWS-ConfigureAWSPackage',
+                Parameters={
+                    'action': ['Uninstall'],
+                    'name': [PACKAGE_NAME]
+                },
+                CloudWatchOutputConfig={
+                    'CloudWatchOutputEnabled': True,
+                    'CloudWatchLogGroupName': f"/tm/{PACKAGE_NAME.lower().replace(' ', '-')}Uninstall"
+                }
+            )
+        else:
+            response = ssm.send_command(
+                InstanceIds=batch,
+                DocumentName='AWS-RunPowerShellScript',
+                Parameters={
+                    'commands': [
+                        "$agentInstalled = Get-WmiObject -Class Win32_Product | Where-Object {$_.Name -eq \"Rapid7 Insight Agent\"}",
+                        "if ($agentInstalled) {",
+                        "    $uninstallResult = msiexec.exe /x $($agentInstalled.IdentifyingNumber) /qn",
+                        "    if ($LASTEXITCODE -ne 0) {",
+                        "        Write-Output \"Failed to uninstall Rapid7 Insight Agent. Exit code: $LASTEXITCODE\"",
+                        "    }",
+                        "} else {",
+                        "    Write-Output \"Rapid7 Insight Agent is not installed.\"",
+                        "}"
+                    ]
+                },
+                CloudWatchOutputConfig={
+                    'CloudWatchOutputEnabled': True,
+                    'CloudWatchLogGroupName': f"/tm/{PACKAGE_NAME.lower().replace(' ', '-')}Uninstall"
+                }
+            )
         command_id = response.get('Command', {}).get('CommandId', '--')
         status = response.get('Command', {}).get('Status', '--')
         logging.info('Command ID: %s Status: %s', command_id, status)
@@ -128,25 +175,8 @@ def check_instances(instance_ids: List[str]) -> List[str]:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description=('Uninstalls a package from EC2 instances that was previously '
-                     'installed with AWS Systems Manager Distributor')
-    )
-    parser.add_argument(
-        'resource_id_file', help='The name of the CSV file containing the resource IDs')
-    parser.add_argument(
-        '-p', '--package-name', help='The name of the package to uninstall', required=True)
-    args = parser.parse_args()
-
-    if args.resource_id_file is None or args.package_name is None:
-        parser.print_help()
-        sys.exit(1)
-
-    resource_id_file = args.resource_id_file
-    package_name = args.package_name
-
     # Read the CSV file
-    with open(resource_id_file, 'r', encoding='utf-8') as f:
+    with open(RESOURCE_ID_FILE, 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
         next(reader, None)  # Skip header
         unique_resource_ids = {row[0] for row in reader if row}
@@ -160,4 +190,4 @@ if __name__ == '__main__':
         logging.warning('No valid instances found')
         sys.exit(1)
 
-    uninstall_package(valid_instances, package_name)
+    uninstall_package(valid_instances)
