@@ -87,36 +87,40 @@ def check_instances(instance_ids: List[str]) -> List[str]:
     """
 
     logging.info('Checking %s instance ID(s)', str(instance_ids))
-    next_token = None
     valid_ids = []
-    while True:
-        try:
-            if next_token:
-                response = ssm.describe_instance_information(
-                    Filters=[{'Key': 'InstanceIds', 'Values': instance_ids}],
-                    NextToken=next_token
-                )
-            else:
-                response = ssm.describe_instance_information(
-                    Filters=[{'Key': 'InstanceIds', 'Values': instance_ids}]
-                )
-            for instance in response['InstanceInformationList']:
-                if instance['PingStatus'] == 'Online':
-                    logging.info(
-                        'Valid instance found with ID %s', instance['InstanceId'])
-                    valid_ids.append(instance['InstanceId'])
+    for i in range(0, len(instance_ids), 100):
+        batch = instance_ids[i:i + 100]
+        next_token = None
+        while True:
+            try:
+                if next_token:
+                    response = ssm.describe_instance_information(
+                        Filters=[{'Key': 'InstanceIds',
+                                  'Values': batch}],
+                        NextToken=next_token
+                    )
                 else:
-                    logging.warning(
-                        'Valid instance %s is not online', instance['InstanceId'])
+                    response = ssm.describe_instance_information(
+                        Filters=[
+                            {'Key': 'InstanceIds', 'Values': batch}]
+                    )
+                for instance in response['InstanceInformationList']:
+                    if instance['PingStatus'] == 'Online':
+                        logging.info(
+                            'Valid instance found with ID %s', instance['InstanceId'])
+                        valid_ids.append(instance['InstanceId'])
+                    else:
+                        logging.warning(
+                            'Valid instance %s is not online', instance['InstanceId'])
 
-            if 'NextToken' in response:
-                next_token = response['NextToken']
-            else:
-                break
+                if 'NextToken' in response:
+                    next_token = response['NextToken']
+                else:
+                    break
 
-        except ClientError as e:
-            logging.error('Error processing instance: %s', str(e))
-            sys.exit(1)
+            except ClientError as e:
+                logging.error('Error processing instance: %s', str(e))
+                sys.exit(1)
 
     logging.info('Found %d valid ID(s) out of %d',
                  len(valid_ids), len(instance_ids))
