@@ -9,7 +9,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 # Configuration
-REGION_NAME = 'us-east-1'
+REGION_NAME = 'us-east-2'
 ssm = boto3.client('ssm', region_name=REGION_NAME)
 
 # Logging
@@ -77,6 +77,7 @@ def check_instances(instance_ids: List[str]) -> List[str]:
         valid_ids: A list of EC2 instance IDs that exist and the SSM agent is online
     """
 
+    logging.info('Checking %s instance ID(s)', str(instance_ids))
     next_token = None
     valid_ids = []
     while True:
