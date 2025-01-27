@@ -5,8 +5,10 @@ This script will accept a CSV file containing a list of EC2 instance IDs, check 
 ## Usage
 
 ```bash
-python uninstall.py -p <package> <path to csv>
+python uninstall.py -p <package> [-m <mode>] <path to csv>
 ```
+
+The `-m` or `--mode` option is optional and can be set to either 'distributor' (default) or 'powershell'.
 
 The script assumes a header in the file and that the first column contains the instance ID. For example:
 
